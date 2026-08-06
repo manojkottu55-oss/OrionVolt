@@ -1,0 +1,244 @@
+const mqtt = require('mqtt');
+const config = require('../config');
+const mqttConfig = require('../config/mqtt');
+const logger = require('../utils/logger');
+const db = require('../db');
+const { getTariffConfig } = require('../db/tariffConfig');
+
+// Store last telemetry times in memory for delta-t calculations
+const lastTelemetryTime = new Map();
+
+// Module-level client variable
+let client;
+
+/**
+ * Handle incoming telemetry data from a kiosk
+ * @param {string} kioskId 
+ * @param {object} data 
+ */
+async function handleTelemetry(kioskId, data) {
+    try {
+        // Find active charging session for this kiosk
+        const chargingSession = await db.chargingSessions.findActive(kioskId);
+        
+        // Save new SensorReading
+        await db.sensorReadings.create({
+            kioskId,
+            sessionId: chargingSession ? chargingSession.session_id : null,
+            voltage: data.voltage,
+            current: data.current,
+            power: data.power,
+            timestamp: data.timestamp || new Date().toISOString()
+        });
+
+        if (chargingSession) {
+            // 1. Snapshot tariff rate if not already done
+            if (!chargingSession.energy_rate_used) {
+                const tariff = await getTariffConfig();
+                chargingSession.energy_rate_used = tariff.energy_rate_per_kwh || 12;
+            }
+
+            // 2. Calculate Power and Energy
+            const now = new Date(data.timestamp || new Date().toISOString());
+            const lastTime = lastTelemetryTime.get(chargingSession.session_id) || new Date(chargingSession.start_time);
+            const deltaHours = (now.getTime() - lastTime.getTime()) / (1000 * 60 * 60);
+            
+            const powerKw = data.power !== undefined ? data.power : ((data.voltage || 0) * (data.current || 0) / 1000);
+            
+            // If device sends energy, use it, else calculate integration
+            let energyDeliveredKwh = parseFloat(chargingSession.energy_delivered_kwh || 0);
+            if (data.energyUsedKwh !== undefined) {
+                energyDeliveredKwh = data.energyUsedKwh;
+            } else if (deltaHours > 0 && deltaHours < 1) {
+                energyDeliveredKwh += (powerKw * deltaHours);
+            }
+
+            lastTelemetryTime.set(chargingSession.session_id, now);
+            
+            // 3. Update session duration and amount paid
+            const sessionDurationMs = now.getTime() - new Date(chargingSession.start_time).getTime();
+            const durationMinutes = sessionDurationMs / 60000;
+            const amountPaid = energyDeliveredKwh * chargingSession.energy_rate_used;
+
+            const updateFields = {
+                energyDeliveredKwh,
+                avgPowerKw: powerKw,
+                durationMinutes,
+                amountPaid,
+                energyRateUsed: chargingSession.energy_rate_used,
+                avgVoltage: data.voltage,
+                avgCurrent: data.current
+            };
+
+            // 4. Check for auto-stop (target met)
+            let shouldAutoStop = false;
+            let parentSession = await db.guestSessions.findBySessionId(chargingSession.session_id) 
+                             || await db.signinSessions.findBySessionId(chargingSession.session_id);
+
+            if (parentSession) {
+                // Determine target energy
+                let targetEnergy = null;
+                if (parentSession.target_type === 'amount' && parentSession.target_value) {
+                    targetEnergy = parentSession.target_value / chargingSession.energy_rate_used;
+                } else if (parentSession.target_type === 'percentage' && parentSession.target_value) {
+                    // Assuming vehicle capacity is fetched somewhere, but if we don't have it here, 
+                    // we might need to rely on estimated_energy if we stored it, or stop based on amount_paid.
+                    // If target is amount:
+                    if (amountPaid >= parentSession.target_value) shouldAutoStop = true;
+                }
+                
+                // If we calculated targetEnergy
+                if (targetEnergy && energyDeliveredKwh >= targetEnergy) {
+                    shouldAutoStop = true;
+                }
+                
+                // If mode is amount, stop when amountPaid >= target_value
+                if (parentSession.target_type === 'amount' && amountPaid >= parentSession.target_value) {
+                    shouldAutoStop = true;
+                }
+            }
+
+            // Check for fault/interruption
+            if (data.chargerStatus === 'fault' || data.chargerStatus === 'stopped' || shouldAutoStop) {
+                updateFields.status = shouldAutoStop ? 'completed' : 'interrupted';
+                updateFields.endTime = new Date().toISOString();
+                
+                if (data.chargerStatus === 'fault') {
+                    updateFields.interruptedReason = 'power_cut';
+                } else if (data.chargerStatus === 'stopped') {
+                    updateFields.interruptedReason = 'manual_stop';
+                } else if (shouldAutoStop) {
+                    updateFields.status = 'completed'; // auto-stop is normal completion
+                    updateFields.interruptedReason = 'none';
+                    // send command to kiosk to stop charging
+                    publishCommand(kioskId, 'STOP_CHARGE', { sessionId: chargingSession.session_id });
+                } else {
+                    updateFields.interruptedReason = 'overcurrent';
+                }
+                
+                await db.chargingSessions.update(chargingSession.session_id, updateFields);
+                lastTelemetryTime.delete(chargingSession.session_id);
+                
+                // Update parent session
+                if (parentSession) {
+                    const model = parentSession.mobile_number ? db.guestSessions : db.signinSessions;
+                    await model.updateStatus(chargingSession.session_id, updateFields.status);
+                }
+
+                // Import refundService lazily to avoid circular dependency
+                if (updateFields.status === 'interrupted' || amountPaid < parentSession?.target_value) {
+                    const refundService = require('./refundService');
+                    await refundService.processAutoRefund(chargingSession.session_id);
+                }
+                
+                logger.mqtt(`Session ${chargingSession.session_id} ended: ${updateFields.status}`);
+            } 
+            // Check for normal completion from device
+            else if (data.sessionStatus === 'completed') {
+                updateFields.status = 'completed';
+                updateFields.endTime = new Date().toISOString();
+                await db.chargingSessions.update(chargingSession.session_id, updateFields);
+                lastTelemetryTime.delete(chargingSession.session_id);
+                
+                if (parentSession) {
+                    const model = parentSession.mobile_number ? db.guestSessions : db.signinSessions;
+                    await model.updateStatus(chargingSession.session_id, 'completed');
+                }
+                
+                logger.mqtt(`Session ${chargingSession.session_id} completed normally`);
+            } else {
+                await db.chargingSessions.update(chargingSession.session_id, updateFields);
+            }
+        }
+    } catch (err) {
+        logger.error(`Error handling telemetry for ${kioskId}: ${err.message}`);
+    }
+}
+
+/**
+ * Handle incoming status data from a kiosk
+ * @param {string} kioskId 
+ * @param {object} data 
+ */
+async function handleStatus(kioskId, data) {
+    try {
+        await db.kiosks.upsert(kioskId, {
+            status: data.status,
+            last_seen: new Date().toISOString(),
+            location: data.location || 'Unknown'
+        });
+        logger.mqtt(`Kiosk ${kioskId} status: ${data.status}`);
+    } catch (err) {
+        logger.error(`Error handling status for ${kioskId}: ${err.message}`);
+    }
+}
+
+/**
+ * Initialize the MQTT client and subscriptions
+ */
+function init() {
+    client = mqtt.connect(config.MQTT_BROKER_URL);
+
+    client.on('connect', () => {
+        logger.mqtt('Connected to MQTT broker');
+        client.subscribe(mqttConfig.SUBSCRIBE_TOPICS, { qos: mqttConfig.QOS.TELEMETRY }, (err) => {
+            if (err) logger.error(`MQTT Subscription error: ${err.message}`);
+        });
+    });
+
+    client.on('message', async (topic, message) => {
+        const parsed = mqttConfig.parseTopic(topic);
+        if (!parsed) return;
+        const { kioskId, messageType } = parsed;
+
+        try {
+            const data = JSON.parse(message.toString());
+            logger.mqtt(`Received ${messageType} from ${kioskId}`);
+            
+            if (messageType === 'telemetry') {
+                await handleTelemetry(kioskId, data);
+            } else if (messageType === 'status') {
+                await handleStatus(kioskId, data);
+            }
+        } catch (err) {
+            logger.error(`Failed to parse MQTT message on topic ${topic}: ${err.message}`);
+        }
+    });
+
+    client.on('error', (err) => {
+        logger.error('MQTT error: ' + err.message);
+    });
+
+    client.on('close', () => {
+        logger.mqtt('MQTT connection closed');
+    });
+}
+
+/**
+ * Publish a command to a specific kiosk
+ * @param {string} kioskId 
+ * @param {string} action 
+ * @param {object} payload 
+ */
+function publishCommand(kioskId, action, payload) {
+    if (!client || !client.connected) {
+        logger.error(`Cannot publish command ${action} to ${kioskId}: MQTT not connected`);
+        return;
+    }
+    
+    const topic = mqttConfig.topics.command(kioskId);
+    const message = JSON.stringify({ action, payload, timestamp: new Date().toISOString() });
+    
+    client.publish(topic, message, { qos: mqttConfig.QOS.COMMAND }, (err) => {
+        if (err) {
+            logger.error(`Error publishing command to ${kioskId}: ${err.message}`);
+        } else {
+            logger.mqtt(`Command sent to ${kioskId}: ${action}`);
+        }
+    });
+}
+
+module.exports = {
+    init,
+    publishCommand
+};
