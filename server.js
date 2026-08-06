@@ -11,7 +11,16 @@ config.validateEnv();
 const app = express();
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'https://orion-volt-userapp.vercel.app',
+    process.env.FRONTEND_URL
+  ],
+  credentials: true
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Start the server
