@@ -20,9 +20,15 @@ exports.createSession = async (req, res) => {
       }
     }
 
-    const kiosk = await db.kiosks.findOne(kioskId);
+    let kiosk = await db.kiosks.findOne(kioskId);
     if (!kiosk) {
-      return res.status(404).json({ error: 'Kiosk not found' });
+      // Auto-create kiosk entry if it doesn't exist yet
+      // (kiosk ID comes from QR scan — it's valid, just not in DB yet)
+      kiosk = await db.kiosks.upsert(kioskId, { 
+        name: 'Demo Kiosk',
+        location: 'Demo Location',
+        status: 'online' 
+      });
     }
 
     const vehicleForTariff = vehicleObj ? {

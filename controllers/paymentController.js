@@ -1,8 +1,133 @@
+const crypto = require('crypto');
 const paymentService = require('../services/paymentService');
 const mqttService = require('../services/mqttService');
+const config = require('../config');
 const db = require('../db');
 const logger = require('../utils/logger');
 
+/**
+ * POST /api/payment/verify
+ * Called from frontend after Razorpay checkout success callback.
+ * Verifies the payment signature, marks the payment as paid,
+ * creates a charging session, and sends MQTT start command.
+ */
+exports.verifyPayment = async (req, res) => {
+  try {
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, sessionId } = req.body;
+
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature || !sessionId) {
+      return res.status(400).json({ error: 'Missing required payment verification fields' });
+    }
+
+    // 1. Verify signature using Razorpay KEY_SECRET
+    const expectedSignature = crypto
+      .createHmac('sha256', config.RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + '|' + razorpay_payment_id)
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      logger.payment(`Signature mismatch for order ${razorpay_order_id}. Expected: ${expectedSignature}, Got: ${razorpay_signature}`);
+      return res.status(400).json({ error: 'Payment verification failed — invalid signature' });
+    }
+
+    logger.payment(`Payment signature verified for order ${razorpay_order_id}`);
+
+    // 2. Find and update payment record
+    const payment = await db.payments.findByGatewayOrderId(razorpay_order_id);
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment record not found for this order' });
+    }
+
+    await db.payments.updateById(payment.id, {
+      status: 'paid',
+      gatewayPaymentId: razorpay_payment_id,
+      paidAt: new Date().toISOString()
+    });
+
+    // 3. Find the session
+    let session = await db.signinSessions.findBySessionId(sessionId);
+    let sessionType = 'signin';
+
+    if (!session) {
+      session = await db.guestSessions.findBySessionId(sessionId);
+      sessionType = 'guest';
+    }
+
+    if (!session) {
+      // Payment is captured but session not found — log it but return success
+      logger.payment(`Payment verified but session ${sessionId} not found. Payment ID: ${razorpay_payment_id}`);
+      return res.status(200).json({ 
+        success: true, 
+        verified: true,
+        message: 'Payment verified successfully'
+      });
+    }
+
+    // 4. Update session to paid
+    if (sessionType === 'signin') {
+      await db.signinSessions.updateStatus(sessionId, 'paid');
+    } else {
+      await db.guestSessions.updateStatus(sessionId, 'paid');
+    }
+
+    // 5. Create charging session
+    await db.chargingSessions.create({
+      sessionId,
+      sessionType,
+      kioskId: session.kiosk_id,
+      startTime: new Date().toISOString(),
+      status: 'active'
+    });
+
+    // 6. Send MQTT command to start charging
+    try {
+      await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
+        sessionId,
+        energy: session.requested_energy,
+        duration: session.requested_duration,
+        vehicleType: session.vehicle_type
+      });
+      logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id}`);
+    } catch (mqttErr) {
+      logger.error(`MQTT command failed for kiosk ${session.kiosk_id}: ${mqttErr.message}`);
+      // Don't fail the response — payment is already captured
+    }
+
+    // 7. Update session to charging
+    if (sessionType === 'signin') {
+      await db.signinSessions.updateStatus(sessionId, 'charging');
+    } else {
+      await db.guestSessions.updateStatus(sessionId, 'charging');
+    }
+
+    // 8. Update kiosk status
+    try {
+      await db.kiosks.updateStatus(session.kiosk_id, 'charging');
+    } catch (kioskErr) {
+      logger.error(`Failed to update kiosk status: ${kioskErr.message}`);
+    }
+
+    logger.payment(`✅ Payment verified & charging started: session=${sessionId}, kiosk=${session.kiosk_id}, payment=${razorpay_payment_id}`);
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      sessionId,
+      kioskId: session.kiosk_id,
+      message: 'Payment verified — charging started'
+    });
+
+  } catch (error) {
+    logger.error(`Payment verification error: ${error.message}`, error);
+    return res.status(500).json({ error: 'Internal server error during payment verification', details: error.message });
+  }
+};
+
+/**
+ * POST /api/payment/webhook
+ * Called by Razorpay servers when a payment event occurs.
+ * Acts as a backup to the frontend verify flow.
+ */
 exports.handleWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
@@ -14,6 +139,8 @@ exports.handleWebhook = async (req, res) => {
     }
 
     const event = req.body.event;
+    logger.payment(`Webhook received: ${event}`);
+
     if (event !== 'payment.captured') {
       return res.status(200).json({ status: 'ignored', event });
     }
@@ -24,7 +151,14 @@ exports.handleWebhook = async (req, res) => {
 
     const payment = await db.payments.findByGatewayOrderId(gatewayOrderId);
     if (!payment) {
+      logger.payment(`Webhook: payment not found for order ${gatewayOrderId}`);
       return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    // If already paid via verify endpoint, skip
+    if (payment.status === 'paid') {
+      logger.payment(`Webhook: payment ${gatewayOrderId} already marked as paid — skipping`);
+      return res.status(200).json({ status: 'already_processed' });
     }
 
     // Update payment status
@@ -47,14 +181,80 @@ exports.handleWebhook = async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Update session to paid
-    if (sessionType === 'guest') {
-      await db.guestSessions.updateStatus(sessionId, 'paid');
+    // Only start charging if not already started
+    if (session.status === 'pending' || session.status === 'created') {
+      // Update session to paid
+      if (sessionType === 'guest') {
+        await db.guestSessions.updateStatus(sessionId, 'paid');
+      } else {
+        await db.signinSessions.updateStatus(sessionId, 'paid');
+      }
+
+      // Create charging session
+      await db.chargingSessions.create({
+        sessionId,
+        sessionType,
+        kioskId: session.kiosk_id,
+        startTime: new Date().toISOString(),
+        status: 'active'
+      });
+
+      // Send MQTT command to kiosk
+      await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
+        sessionId,
+        duration: session.requested_duration,
+        energy: session.requested_energy,
+        vehicleType: session.vehicle_type
+      });
+
+      // Update session to charging
+      if (sessionType === 'guest') {
+        await db.guestSessions.updateStatus(sessionId, 'charging');
+      } else {
+        await db.signinSessions.updateStatus(sessionId, 'charging');
+      }
+
+      // Update kiosk status
+      await db.kiosks.updateStatus(session.kiosk_id, 'charging');
+
+      logger.payment(`Webhook: Payment confirmed for session ${sessionId}. Charging started on kiosk ${session.kiosk_id}`);
     } else {
-      await db.signinSessions.updateStatus(sessionId, 'paid');
+      logger.payment(`Webhook: Session ${sessionId} already in status '${session.status}' — skipping charging start`);
     }
 
-    // Create charging session
+    return res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    logger.error('Webhook processing error: ' + error.message, error);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
+/**
+ * POST /api/payment/demo-verify
+ * Mock verification for prototype without Razorpay signatures.
+ */
+exports.demoVerifyPayment = async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+
+    // 1. Find the session
+    let session = await db.signinSessions.findBySessionId(sessionId);
+    let sessionType = 'signin';
+
+    if (!session) {
+      session = await db.guestSessions.findBySessionId(sessionId);
+      sessionType = 'guest';
+    }
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // 2. Create charging session
     await db.chargingSessions.create({
       sessionId,
       sessionType,
@@ -63,28 +263,45 @@ exports.handleWebhook = async (req, res) => {
       status: 'active'
     });
 
-    // Send MQTT command to kiosk
-    await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
-      sessionId,
-      duration: session.requested_duration,
-      energy: session.requested_energy,
-      vehicleType: session.vehicle_type
-    });
-
-    // Update session to charging
-    if (sessionType === 'guest') {
-      await db.guestSessions.updateStatus(sessionId, 'charging');
-    } else {
-      await db.signinSessions.updateStatus(sessionId, 'charging');
+    // 3. Send MQTT command to start charging
+    try {
+      await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
+        sessionId,
+        energy: session.requested_energy,
+        duration: session.requested_duration,
+        vehicleType: session.vehicle_type
+      });
+      logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id}`);
+    } catch (mqttErr) {
+      logger.error(`MQTT command failed for kiosk ${session.kiosk_id}: ${mqttErr.message}`);
     }
 
-    // Update kiosk status
-    await db.kiosks.updateStatus(session.kiosk_id, 'charging');
+    // 4. Update session to charging
+    if (sessionType === 'signin') {
+      await db.signinSessions.updateStatus(sessionId, 'charging');
+    } else {
+      await db.guestSessions.updateStatus(sessionId, 'charging');
+    }
 
-    logger.payment(`Payment confirmed for session ${sessionId}. Charging started on kiosk ${session.kiosk_id}`);
-    return res.status(200).json({ status: 'ok' });
+    // 5. Update kiosk status
+    try {
+      await db.kiosks.updateStatus(session.kiosk_id, 'charging');
+    } catch (kioskErr) {
+      logger.error(`Failed to update kiosk status: ${kioskErr.message}`);
+    }
+
+    logger.payment(`✅ Demo Payment verified & charging started: session=${sessionId}`);
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      sessionId,
+      kioskId: session.kiosk_id,
+      message: 'Payment verified — charging started'
+    });
+
   } catch (error) {
-    logger.error('Webhook processing error', error);
-    return res.status(500).json({ error: 'Internal server error', details: error.message });
+    logger.error(`Demo Payment verification error: ${error.message}`, error);
+    return res.status(500).json({ error: 'Internal server error during payment verification', details: error.message });
   }
 };

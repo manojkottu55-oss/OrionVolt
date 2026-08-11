@@ -82,3 +82,31 @@ app.use('/api/feedback', feedbackRoutes);
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', service: 'orionvolt-backend', db: 'supabase' });
 });
+
+// Temporary endpoint to list all kiosk IDs
+app.get('/api/kiosks/list-all', async (req, res) => {
+    try {
+        const db = require('./db');
+        const kiosks = await db.kiosks.findAll();
+        res.json({ kiosks: kiosks.map(k => k.kiosk_id) });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Temporarily print all available routes
+console.log("--- Available Routes ---");
+app._router.stack.forEach(r => {
+  if (r.route && r.route.path) {
+    console.log(r.route.path);
+  } else if (r.name === 'router') {
+    // For router middleware, we can print the sub-routes
+    r.handle.stack.forEach(handler => {
+      if (handler.route && handler.route.path) {
+        // We don't have the mount path here easily, but we can print the subpath
+        console.log(`[Router] ${handler.route.path}`);
+      }
+    });
+  }
+});
+console.log("------------------------");
