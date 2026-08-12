@@ -6,6 +6,7 @@
 -- 1. KIOSKS
 CREATE TABLE IF NOT EXISTS kiosks (
   kiosk_id   TEXT PRIMARY KEY,
+  name       TEXT,
   location   TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'offline'
                CHECK (status IN ('online', 'offline', 'charging', 'fault')),
@@ -21,8 +22,23 @@ CREATE TABLE IF NOT EXISTS profiles (
   google_id     TEXT UNIQUE,
   name          TEXT,
   email         TEXT,
+  profile_completed BOOLEAN DEFAULT false,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
+
+-- 2.5 USER VEHICLES (saved by users)
+CREATE TABLE IF NOT EXISTS user_vehicles (
+  id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  vehicle_type                TEXT CHECK (vehicle_type IN ('two_wheeler', 'three_wheeler', 'four_wheeler')),
+  vehicle_make                TEXT,
+  vehicle_model               TEXT,
+  vehicle_registration_number TEXT,
+  is_default                  BOOLEAN DEFAULT false,
+  created_at                  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_vehicles_user_id ON user_vehicles(user_id);
 
 -- 3. VEHICLE MASTER
 CREATE TABLE IF NOT EXISTS vehicle_master (
@@ -52,6 +68,7 @@ CREATE TABLE IF NOT EXISTS guest_sessions (
   target_value       NUMERIC,
   requested_duration NUMERIC,
   requested_energy   NUMERIC,
+  estimated_time_minutes NUMERIC,
   estimated_amount   NUMERIC NOT NULL,
   status             TEXT DEFAULT 'pending'
                        CHECK (status IN ('pending', 'paid', 'charging', 'completed', 'refunded', 'failed')),
@@ -70,6 +87,7 @@ CREATE TABLE IF NOT EXISTS signin_sessions (
   target_value       NUMERIC,
   requested_duration NUMERIC,
   requested_energy   NUMERIC,
+  estimated_time_minutes NUMERIC,
   estimated_amount   NUMERIC NOT NULL,
   status             TEXT DEFAULT 'pending'
                        CHECK (status IN ('pending', 'paid', 'charging', 'completed', 'refunded', 'failed')),
@@ -151,6 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_sensor_readings_kiosk_ts ON sensor_readings(kiosk
 
 ALTER TABLE kiosks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicle_master ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guest_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE signin_sessions ENABLE ROW LEVEL SECURITY;
@@ -166,8 +185,20 @@ CREATE POLICY "vehicles_read_all" ON vehicle_master FOR SELECT TO authenticated 
 -- Profiles: users can only read/update their own profile
 CREATE POLICY "profiles_read_own" ON profiles FOR SELECT TO authenticated
   USING (id = auth.uid());
+CREATE POLICY "profiles_insert_own" ON profiles FOR INSERT TO authenticated
+  WITH CHECK (id = auth.uid());
 CREATE POLICY "profiles_update_own" ON profiles FOR UPDATE TO authenticated
   USING (id = auth.uid());
+
+-- User Vehicles: users can only manage their own vehicles
+CREATE POLICY "user_vehicles_read_own" ON user_vehicles FOR SELECT TO authenticated
+  USING (user_id = auth.uid());
+CREATE POLICY "user_vehicles_insert_own" ON user_vehicles FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "user_vehicles_update_own" ON user_vehicles FOR UPDATE TO authenticated
+  USING (user_id = auth.uid());
+CREATE POLICY "user_vehicles_delete_own" ON user_vehicles FOR DELETE TO authenticated
+  USING (user_id = auth.uid());
 
 -- Signin sessions: users can only read their own
 CREATE POLICY "signin_sessions_read_own" ON signin_sessions FOR SELECT TO authenticated
@@ -201,9 +232,49 @@ CREATE TRIGGER set_updated_at_charging_sessions
 -- ============================================================
 -- ENABLE REALTIME for tables that need live subscriptions
 -- ============================================================
-ALTER PUBLICATION supabase_realtime ADD TABLE kiosks;
-ALTER PUBLICATION supabase_realtime ADD TABLE charging_sessions;
-ALTER PUBLICATION supabase_realtime ADD TABLE sensor_readings;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'kiosks'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE kiosks;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'charging_sessions'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE charging_sessions;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'sensor_readings'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE sensor_readings;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'user_vehicles'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE user_vehicles;
+  END IF;
+END $$;
 
 -- ============================================================
 -- 10. CONFIGURATION TABLES
@@ -238,3 +309,4 @@ CREATE TRIGGER set_updated_at_tariff_config
 CREATE TRIGGER set_updated_at_grid_tariff_config
   BEFORE UPDATE ON grid_tariff_config
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+

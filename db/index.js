@@ -14,6 +14,8 @@ const profiles = require('./profiles');
 const tariffConfig = require('./tariffConfig');
 const gridTariffConfig = require('./gridTariffConfig');
 const alerts = require('./alerts');
+const bookings = require('./bookings');
+const userVehicles = require('./userVehicles');
 
 module.exports = {
   kiosks,
@@ -27,5 +29,7 @@ module.exports = {
   profiles,
   tariffConfig,
   gridTariffConfig,
-  alerts
+  alerts,
+  bookings,
+  userVehicles
 };

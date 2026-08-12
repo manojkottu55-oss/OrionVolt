@@ -67,6 +67,9 @@ const paymentRoutes = require('./routes/payment');
 const refundRoutes = require('./routes/refund');
 const chargeRoutes = require('./routes/charge');
 const feedbackRoutes = require('./routes/feedback');
+const sessionsRoutes = require('./routes/sessions');
+const bookingsRoutes = require('./routes/bookings');
+const profileRoutes = require('./routes/profile');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/guest', guestRoutes);
@@ -77,6 +80,10 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/refund', refundRoutes);
 app.use('/api/charge', chargeRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/bookings', bookingsRoutes);
+app.use('/api/profile', profileRoutes);
+
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -13,6 +13,7 @@ async function create(session) {
       target_value: session.targetValue || 0,
       requested_duration: session.requestedDuration,
       requested_energy: session.requestedEnergy,
+      estimated_time_minutes: session.estimatedTimeMinutes,
       estimated_amount: session.estimatedAmount,
       status: session.status || 'pending',
       qr_login_token: session.qrLoginToken || null

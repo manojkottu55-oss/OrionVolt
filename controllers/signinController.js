@@ -6,7 +6,8 @@ const { isValidEnum } = require('../middleware/validate');
 
 exports.createSession = async (req, res) => {
   try {
-    const { kioskId, vehicleType, duration, energy, targetType, targetValue, vehicleId } = req.body;
+    console.log('Request body:', req.body);
+    const { kioskId, vehicleType, duration, energy, targetType, targetValue, vehicleId, estimatedTimeMinutes } = req.body;
 
     if (vehicleType && !isValidEnum(vehicleType, tariff.VEHICLE_TYPES)) {
       return res.status(400).json({ error: 'Invalid vehicle type.' });
@@ -55,13 +56,20 @@ exports.createSession = async (req, res) => {
       targetValue: targetValue || 0,
       requestedDuration: duration,
       requestedEnergy: energy,
+      estimatedTimeMinutes: estimatedTimeMinutes,
       estimatedAmount,
       status: 'pending'
     });
+    
+    console.log('DB result:', session);
 
     return res.status(201).json({ success: true, session });
-  } catch (error) {
-    return res.status(500).json({ error: 'Internal server error', details: error.message });
+  } catch (err) {
+    console.error('SESSION CREATE ERROR:', err);
+    console.error('Stack:', err.stack);
+    return res.status(500).json({ 
+      error: err.message 
+    });
   }
 };
 

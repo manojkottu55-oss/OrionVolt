@@ -40,4 +40,21 @@ async function findById(userId) {
   return data;
 }
 
-module.exports = { findOrCreate, findById };
+async function update(userId, fields) {
+  const updateData = {};
+  if (fields.name !== undefined) updateData.name = fields.name;
+  if (fields.mobileNumber !== undefined) updateData.mobile_number = fields.mobileNumber;
+  if (fields.profileCompleted !== undefined) updateData.profile_completed = fields.profileCompleted;
+  
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(updateData)
+    .eq('id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+module.exports = { findOrCreate, findById, update };
