@@ -18,4 +18,11 @@ router.get('/bookings', bookingsController.adminGetAllBookings);
 router.patch('/bookings/:id/status', bookingsController.adminUpdateStatus);
 router.delete('/bookings/:id', bookingsController.adminDeleteBooking);
 
+// Admin support tickets (no auth — matches existing admin route pattern)
+router.get('/support-tickets', adminController.getSupportTickets);
+router.get('/support-tickets/:id', adminController.getSupportTicketById);
+router.patch('/support-tickets/:id/status', adminController.updateSupportTicketStatus);
+router.patch('/support-tickets/:id/notes', adminController.updateSupportTicketNotes);
+
 module.exports = router;
+

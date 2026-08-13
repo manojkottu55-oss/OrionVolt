@@ -295,13 +295,106 @@ exports.getAnalytics = async (req, res) => {
 
 exports.getAlerts = async (req, res) => {
   try {
-    const alerts = await db.alerts.getAllAlerts();
-    res.status(200).json({ success: true, alerts });
+    const systemAlerts = await db.alerts.getAllAlerts();
+
+    // Merge in open support tickets as alert entries
+    let ticketAlerts = [];
+    try {
+      const openTickets = await db.supportTickets.findAll({ status: 'open' });
+      ticketAlerts = openTickets.map(t => ({
+        id: `TICKET-${t.id}`,
+        type: 'support_ticket',
+        severity: 'info',
+        title: `New Support Ticket: ${t.subject}`,
+        message: `From ${t.name} · ${t.email}`,
+        user: t.name,
+        createdAt: t.created_at,
+        ticketId: t.id,
+      }));
+    } catch (ticketErr) {
+      console.warn('Could not fetch ticket alerts:', ticketErr.message);
+    }
+
+    // Newest first: merge and sort by createdAt
+    const combined = [...systemAlerts, ...ticketAlerts].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.status(200).json({ success: true, alerts: combined, openTicketCount: ticketAlerts.length });
   } catch (error) {
     console.error("Error fetching alerts:", error);
     res.status(500).json({ error: "Failed to fetch alerts" });
   }
 };
+
+// ── SUPPORT TICKETS ADMIN ──
+
+exports.getSupportTickets = async (req, res) => {
+  try {
+    const { status, subject, search } = req.query;
+    const tickets = await db.supportTickets.findAll({ status, subject, search });
+
+    // Compute stats
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const todayStr = now.toISOString().split('T')[0];
+
+    const openCount = tickets.filter(t => t.status === 'open').length;
+    const resolvedToday = tickets.filter(t =>
+      t.status === 'resolved' && t.updated_at && t.updated_at.startsWith(todayStr)
+    ).length;
+    const thisWeek = tickets.filter(t => new Date(t.created_at) >= weekAgo).length;
+
+    res.status(200).json({
+      success: true,
+      tickets,
+      stats: { openCount, resolvedToday, thisWeek }
+    });
+  } catch (error) {
+    console.error('Error fetching support tickets:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
+exports.getSupportTicketById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const ticket = await db.supportTickets.findById(id);
+    res.status(200).json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error fetching support ticket:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
+exports.updateSupportTicketStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const validStatuses = ['open', 'in_progress', 'resolved', 'closed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status value' });
+    }
+    const ticket = await db.supportTickets.updateStatus(id, status);
+    res.status(200).json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error updating support ticket status:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
+exports.updateSupportTicketNotes = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { admin_notes } = req.body;
+    const ticket = await db.supportTickets.updateNotes(id, admin_notes);
+    res.status(200).json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error updating support ticket notes:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
 
 exports.getKioskLiveData = async (req, res) => {
   try {
