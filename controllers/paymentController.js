@@ -254,7 +254,29 @@ exports.demoVerifyPayment = async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // 2. Create charging session
+    // 2. Create a payments record so Admin Payments page is populated
+    const demoOrderId  = `DEMO_${sessionId.replace(/-/g, '').substring(0, 14)}`;
+    const demoPayId    = `demo_pay_${Date.now()}`;
+    try {
+      // Only insert if no payment record exists yet for this session
+      const existing = await db.payments.findBySessionId(sessionId);
+      if (!existing) {
+        await db.payments.create({
+          sessionId,
+          orderId:          demoOrderId,
+          amount:           session.estimated_amount || 0,
+          gatewayOrderId:   demoOrderId,
+          gatewayPaymentId: demoPayId,
+          status:           'paid',
+          paidAt:           new Date().toISOString()
+        });
+      }
+    } catch (payErr) {
+      // Non-fatal — log and continue
+      logger.error(`Demo payment record creation failed: ${payErr.message}`);
+    }
+
+    // 3. Create charging session
     await db.chargingSessions.create({
       sessionId,
       sessionType,
@@ -263,7 +285,7 @@ exports.demoVerifyPayment = async (req, res) => {
       status: 'active'
     });
 
-    // 3. Send MQTT command to start charging
+    // 4. Send MQTT command to start charging
     try {
       await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
@@ -276,14 +298,14 @@ exports.demoVerifyPayment = async (req, res) => {
       logger.error(`MQTT command failed for kiosk ${session.kiosk_id}: ${mqttErr.message}`);
     }
 
-    // 4. Update session to charging
+    // 5. Update session to charging
     if (sessionType === 'signin') {
       await db.signinSessions.updateStatus(sessionId, 'charging');
     } else {
       await db.guestSessions.updateStatus(sessionId, 'charging');
     }
 
-    // 5. Update kiosk status
+    // 6. Update kiosk status
     try {
       await db.kiosks.updateStatus(session.kiosk_id, 'charging');
     } catch (kioskErr) {
@@ -305,3 +327,4 @@ exports.demoVerifyPayment = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error during payment verification', details: error.message });
   }
 };
+

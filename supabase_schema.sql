@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS charging_sessions (
   avg_current        NUMERIC DEFAULT 0,
   status             TEXT DEFAULT 'active'
                        CHECK (status IN ('active', 'completed', 'interrupted')),
+                       -- NOTE: Manual stop uses status='interrupted' + interrupted_reason='manual_stop'
+                       --       Hardware faults use status='interrupted' + interrupted_reason='power_cut'|'overcurrent'
   interrupted_reason TEXT DEFAULT 'none'
                        CHECK (interrupted_reason IN ('power_cut', 'overcurrent', 'manual_stop', 'none')),
   created_at         TIMESTAMPTZ DEFAULT now(),

@@ -9,14 +9,6 @@ exports.getKiosks = async (req, res) => {
       lastSeen: k.last_seen
     }));
 
-    if (kiosks.length <= 1) {
-      kiosks = Array.from({ length: 24 }).map((_, i) => ({
-        kioskId: `KSK${String(i + 1).padStart(3, '0')}`,
-        location: `Station ${String.fromCharCode(65 + (i % 5))}`,
-        status: i < 20 ? 'online' : 'offline',
-        lastSeen: new Date(Date.now() - (i < 20 ? Math.random() * 60000 : 3600000 * 24)).toISOString()
-      }));
-    }
     return res.status(200).json({ success: true, count: kiosks.length, kiosks });
   } catch (error) {
     return res.status(500).json({ error: 'Internal server error', details: error.message });
@@ -48,21 +40,6 @@ exports.getSessions = async (req, res) => {
       createdAt: s.created_at
     }));
 
-    if (allSessions.length <= 1) {
-      allSessions = Array.from({ length: 24 }).map((_, i) => ({
-        sessionId: `S20260531${String(i + 1).padStart(3, '0')}`,
-        kioskId: `KSK${String((i % 24) + 1).padStart(3, '0')}`,
-        sessionType: i % 3 === 0 ? 'guest' : 'signin',
-        vehicleType: i % 2 === 0 ? 'two_wheeler' : 'four_wheeler',
-        estimatedAmount: Math.floor(Math.random() * 400 + 50),
-        status: i < 20 ? 'completed' : (i < 22 ? 'charging' : (i === 22 ? 'interrupted' : 'pending')),
-        createdAt: new Date(Date.now() - (i * 3600000)).toISOString()
-      }));
-      if (status) {
-        allSessions = allSessions.filter(s => s.status === status);
-      }
-    }
-
     return res.status(200).json({ success: true, count: allSessions.length, sessions: allSessions });
   } catch (error) {
     console.error(error);
@@ -80,16 +57,6 @@ exports.getPayments = async (req, res) => {
       sessionId: p.session_id,
       paidAt: p.paid_at
     }));
-
-    if (payments.length <= 1) {
-      payments = Array.from({ length: 15 }).map((_, i) => ({
-        orderId: `PAY50${String(i + 1).padStart(2, '0')}`,
-        sessionId: `S20260531${String(i + 1).padStart(3, '0')}`,
-        amount: Math.floor(Math.random() * 400 + 50),
-        status: i % 5 === 0 ? 'failed' : 'paid',
-        paidAt: new Date(Date.now() - (i * 4500000)).toISOString()
-      }));
-    }
 
     return res.status(200).json({ success: true, count: payments.length, payments });
   } catch (error) {
@@ -109,17 +76,6 @@ exports.getRefunds = async (req, res) => {
       amountRefunded: r.amount_refunded,
       processedAt: r.processed_at
     }));
-
-    if (refunds.length <= 1) {
-      refunds = Array.from({ length: 5 }).map((_, i) => ({
-        sessionId: `S20260531${String(i + 15).padStart(3, '0')}`,
-        amountPaid: Math.floor(Math.random() * 200 + 100),
-        amountRefunded: Math.floor(Math.random() * 100 + 50),
-        reason: i % 2 === 0 ? 'Power Cut' : 'Early Stop',
-        status: i < 3 ? 'processed' : (i === 3 ? 'pending' : 'failed'),
-        processedAt: new Date(Date.now() - (i * 86400000)).toISOString()
-      }));
-    }
 
     return res.status(200).json({ success: true, count: refunds.length, refunds });
   } catch (error) {
@@ -201,11 +157,11 @@ exports.getAnalytics = async (req, res) => {
     }));
     if (recentSessions.length === 0) {
       recentSessions = [
-        { id: 'S20260531001', kiosk: 'KSK001', user: '9876543210', status: 'Charging', time: '10:28 AM' },
-        { id: 'S20260531002', kiosk: 'KSK004', user: '9123456780', status: 'Charging', time: '10:25 AM' },
-        { id: 'S20260531003', kiosk: 'KSK002', user: 'Guest', status: 'Completed', time: '10:20 AM' },
-        { id: 'S20260531004', kiosk: 'KSK003', user: '9988776655', status: 'Charging', time: '10:18 AM' },
-        { id: 'S20260531005', kiosk: 'KSK001', user: 'Guest', status: 'Completed', time: '10:10 AM' }
+        { id: 'S20260531001', kiosk: 'KS001', user: '9876543210', status: 'Charging', time: '10:28 AM' },
+        { id: 'S20260531002', kiosk: 'KS001', user: '9123456780', status: 'Charging', time: '10:25 AM' },
+        { id: 'S20260531003', kiosk: 'KS001', user: 'Guest', status: 'Completed', time: '10:20 AM' },
+        { id: 'S20260531004', kiosk: 'KS001', user: '9988776655', status: 'Charging', time: '10:18 AM' },
+        { id: 'S20260531005', kiosk: 'KS001', user: 'Guest', status: 'Completed', time: '10:10 AM' }
       ];
     }
 
