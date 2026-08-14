@@ -51,4 +51,27 @@ async function findWithFilter(filter = {}) {
   return data;
 }
 
-module.exports = { create, findBySessionId, updateStatus, findWithFilter };
+async function update(sessionId, fields) {
+  const mapped = {};
+  if (fields.vehicleType      !== undefined) mapped.vehicle_type       = fields.vehicleType;
+  if (fields.vehicleMake      !== undefined) mapped.vehicle_make       = fields.vehicleMake;
+  if (fields.vehicleModel     !== undefined) mapped.vehicle_model      = fields.vehicleModel;
+  if (fields.vehicleId        !== undefined) mapped.vehicle_id         = fields.vehicleId;
+  if (fields.targetType       !== undefined) mapped.target_type        = fields.targetType;
+  if (fields.targetValue      !== undefined) mapped.target_value       = fields.targetValue;
+  if (fields.requestedEnergy  !== undefined) mapped.requested_energy   = fields.requestedEnergy;
+  if (fields.requestedDuration!== undefined) mapped.requested_duration = fields.requestedDuration;
+  if (fields.estimatedAmount  !== undefined) mapped.estimated_amount   = fields.estimatedAmount;
+  if (fields.status           !== undefined) mapped.status             = fields.status;
+
+  const { data, error } = await supabase
+    .from('guest_sessions')
+    .update(mapped)
+    .eq('session_id', sessionId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+module.exports = { create, findBySessionId, update, updateStatus, findWithFilter };

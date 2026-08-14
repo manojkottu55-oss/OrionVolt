@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS guest_sessions (
   kiosk_id           TEXT NOT NULL REFERENCES kiosks(kiosk_id),
   vehicle_type       TEXT CHECK (vehicle_type IN ('two_wheeler', 'three_wheeler', 'four_wheeler')),
   vehicle_id         UUID REFERENCES vehicle_master(id),
+  vehicle_make       TEXT,                                   -- populated by PATCH /guest/session/:id
+  vehicle_model      TEXT,                                   -- populated by PATCH /guest/session/:id
   target_type        TEXT DEFAULT 'energy'
                        CHECK (target_type IN ('duration', 'energy', 'amount', 'percentage', 'full_charge')),
   target_value       NUMERIC,
