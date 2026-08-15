@@ -56,6 +56,23 @@ exports.getCompanies = async (req, res) => {
  * for a given type + company. No auth required — third dropdown on kiosk display.
  * The ESP32 needs the vehicle `id` to pass as vehicleId in PATCH /api/guest/session/:id
  */
+/**
+ * GET /api/vehicles/lite
+ * Returns stripped-down vehicle list for ESP32 kiosks with limited RAM.
+ * Only includes: id, make, model, type, battery_capacity_kwh, nominal_voltage, max_charging_current.
+ */
+exports.getLite = async (req, res) => {
+  try {
+    const vehicles = await db.vehicleMaster.findAll();
+    const lite = vehicles.map(({ id, make, model, type, battery_capacity_kwh, nominal_voltage, max_charging_current }) => ({
+      id, make, model, type, battery_capacity_kwh, nominal_voltage, max_charging_current
+    }));
+    return res.status(200).json({ success: true, vehicles: lite });
+  } catch (error) {
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
 exports.getModels = async (req, res) => {
   try {
     const { type, company } = req.query;
