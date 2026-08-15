@@ -175,8 +175,19 @@ exports.stopSession = async (req, res) => {
       });
     }
 
-    // 9. MQTT stop command is skipped until hardware integration is ready
-    // mqttService.publishCommand(signinSession.kiosk_id, 'stop_charging', { sessionId });
+    // 9. Publish MQTT stop command to turn off the relay and update the kiosk display
+    try {
+      mqttService.publishCommand(signinSession.kiosk_id, 'stop_charging', {
+        sessionId,
+        finalEnergyKwh,
+        finalCost,
+        refundAmount,
+        reason: 'manual_stop'
+      });
+    } catch (mqttErr) {
+      // Non-fatal — session is already stopped in DB
+      console.error(`MQTT stop_charging failed for kiosk ${signinSession.kiosk_id}: ${mqttErr.message}`);
+    }
 
     return res.status(200).json({
       success: true,

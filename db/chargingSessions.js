@@ -29,11 +29,15 @@ async function findBySessionId(sessionId) {
 }
 
 async function findActive(kioskId) {
+  // Use limit(1) + order so stale duplicate 'active' rows (from interrupted tests)
+  // never cause maybeSingle() to throw — we always get the newest active session.
   const { data, error } = await supabase
     .from('charging_sessions')
     .select('*')
     .eq('kiosk_id', kioskId)
     .eq('status', 'active')
+    .order('start_time', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return data;
@@ -58,7 +62,7 @@ async function update(sessionId, fields) {
     .update(mapped)
     .eq('session_id', sessionId)
     .select()
-    .single();
+    .maybeSingle(); // was .single() — threw 'multiple rows' when stale active sessions existed
   if (error) throw error;
   return data;
 }
