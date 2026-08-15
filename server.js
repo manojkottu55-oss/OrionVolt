@@ -26,6 +26,11 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Health-check homepage
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'OrionVolt Backend API is running' });
+});
+
 // Start the server
 const server = app.listen(config.PORT, async () => {
     logger.info(`=================================================`);
