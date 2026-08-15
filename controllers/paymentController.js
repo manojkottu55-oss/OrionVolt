@@ -81,13 +81,24 @@ exports.verifyPayment = async (req, res) => {
 
     // 6. Send MQTT command to start charging
     try {
-      await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
+      // Fetch the tariff rate so the kiosk knows the cost basis
+      // (signin_sessions doesn't store rate, so we read from the same live tariff config)
+      const { getTariffConfig } = require('../db/tariffConfig');
+      const tariff = await getTariffConfig();
+      const energyRate = parseFloat(tariff.energy_rate_per_kwh || 12);
+
+      // Pull the pre-calculated values from the session record
+      const targetEnergyKwh = parseFloat(session.requested_energy || 0);
+      const estimatedCost   = parseFloat(session.estimated_amount || 0);
+
+      mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        energy: session.requested_energy,
-        duration: session.requested_duration,
+        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
+        energyRate,            // ₹ per kWh (e.g. 12)
+        estimatedCost,         // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
-      logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id}`);
+      logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id} — target: ${targetEnergyKwh} kWh @ ₹${energyRate}/kWh = ₹${estimatedCost}`);
     } catch (mqttErr) {
       logger.error(`MQTT command failed for kiosk ${session.kiosk_id}: ${mqttErr.message}`);
       // Don't fail the response — payment is already captured
