@@ -77,6 +77,7 @@ const sessionsRoutes = require('./routes/sessions');
 const bookingsRoutes = require('./routes/bookings');
 const profileRoutes = require('./routes/profile');
 const supportRoutes = require('./routes/support');
+const kioskRoutes = require('./routes/kiosk');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/guest', guestRoutes);
@@ -92,6 +93,7 @@ app.use('/api/sessions', sessionsRoutes);
 app.use('/api/bookings', bookingsRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/kiosk', kioskRoutes);
 
 
 // Health check
