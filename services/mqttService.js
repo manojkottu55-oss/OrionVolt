@@ -162,14 +162,33 @@ async function handleTelemetry(kioskId, data) {
  */
 async function handleStatus(kioskId, data) {
     try {
+        // Map ESP32 statuses to allowed DB statuses ('online', 'offline', 'charging', 'fault')
+        let normalizedStatus = data.status ? data.status.toLowerCase() : 'offline';
+        const validStatuses = ['online', 'offline', 'charging', 'fault'];
+        
+        if (!validStatuses.includes(normalizedStatus)) {
+            // Log a clear warning with the exact value the ESP32 sent
+            logger.warn(`ESP32 sent unmapped status '${data.status}' for kiosk ${kioskId}. Mapping to a valid state.`);
+            
+            // Normalize common ESP32 states
+            if (['idle', 'ready', 'available', 'connected'].includes(normalizedStatus)) {
+                normalizedStatus = 'online';
+            } else if (['disconnected', 'error', 'maintenance'].includes(normalizedStatus)) {
+                normalizedStatus = 'offline';
+            } else {
+                normalizedStatus = 'online'; // Safe fallback so we don't break the insert
+            }
+        }
+
         await db.kiosks.upsert(kioskId, {
-            status: data.status,
+            status: normalizedStatus,
             last_seen: new Date().toISOString(),
             location: data.location || 'Unknown'
         });
-        logger.mqtt(`Kiosk ${kioskId} status: ${data.status}`);
+        logger.mqtt(`Kiosk ${kioskId} status updated to: ${normalizedStatus} (original: ${data.status})`);
     } catch (err) {
-        logger.error(`Error handling status for ${kioskId}: ${err.message}`);
+        // Include the exact status that caused the failure in the error log
+        logger.error(`Error handling status for ${kioskId} (received status: '${data.status}'): ${err.message}`);
     }
 }
 
