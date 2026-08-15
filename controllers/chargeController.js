@@ -9,6 +9,12 @@ const calculateEstimate = async (req, res) => {
             return res.status(400).json({ error: 'Vehicle ID is required' });
         }
 
+        // Validate UUID format before hitting the DB (prevents Postgres 22P02 crash)
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(vehicleId)) {
+            return res.status(400).json({ error: 'Invalid vehicle ID format' });
+        }
+
         // Fetch active tariff configuration
         const tariff = await getTariffConfig();
         const energyRate = tariff.energy_rate_per_kwh || 12; // fallback just in case

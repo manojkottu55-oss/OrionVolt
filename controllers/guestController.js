@@ -25,6 +25,10 @@ exports.createSession = async (req, res) => {
 
     let vehicleObj = null;
     if (vehicleId) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(vehicleId)) {
+        return res.status(400).json({ error: 'Invalid vehicle ID format' });
+      }
       vehicleObj = await db.vehicleMaster.findById(vehicleId);
       if (!vehicleObj) {
         return res.status(404).json({ error: 'Vehicle not found' });
@@ -105,6 +109,10 @@ exports.updateSession = async (req, res) => {
     // Lookup vehicle object for battery capacity (used in % / full_charge calculations)
     let vehicleObj = null;
     if (vehicleId) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(vehicleId)) {
+        return res.status(400).json({ error: 'Invalid vehicle ID format' });
+      }
       vehicleObj = await db.vehicleMaster.findById(vehicleId);
       if (!vehicleObj) {
         return res.status(404).json({ error: `Vehicle id '${vehicleId}' not found in vehicle_master` });
