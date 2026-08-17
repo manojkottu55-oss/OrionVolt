@@ -29,7 +29,7 @@ router.post('/:kioskId/connected', async (req, res) => {
       message: 'User Connected - Completing Charge on Phone'
     });
 
-    logger.mqtt(`Kiosk ${kioskId}: user connected ping sent`);
+    logger.mqtt(`[DEBUG-KIOSK] Kiosk ${kioskId}: user connected ping sent (endpoint /api/kiosk/:kioskId/connected fired)`);
 
     return res.status(200).json({
       success: true,

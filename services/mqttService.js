@@ -218,12 +218,24 @@ function init() {
         const { kioskId, messageType } = parsed;
 
         try {
-            const data = JSON.parse(message.toString());
-            logger.mqtt(`Received ${messageType} from ${kioskId}`);
+            const rawString = message.toString();
+            const data = JSON.parse(rawString);
             
             if (messageType === 'telemetry') {
+                // If it's stopped or idle, check if we recently sent a start_charging command
+                if (data.chargerStatus === 'stopped' || data.chargerStatus === 'idle') {
+                    const startCmdTime = module.exports.lastStartCommandTime?.get(kioskId);
+                    if (startCmdTime) {
+                        const diffSec = (new Date().getTime() - startCmdTime.getTime()) / 1000;
+                        if (diffSec < 15) { // within 15 seconds of start_charging
+                            logger.mqtt(`[DEBUG-TELEMETRY] Received '${data.chargerStatus}' telemetry for ${kioskId} exactly ${diffSec.toFixed(2)}s after start_charging. RAW MESSAGE: ${rawString}`);
+                        }
+                    }
+                }
+                logger.mqtt(`Received telemetry from ${kioskId}: ${rawString}`);
                 await handleTelemetry(kioskId, data);
             } else if (messageType === 'status') {
+                logger.mqtt(`Received status from ${kioskId}: ${rawString}`);
                 await handleStatus(kioskId, data);
             }
         } catch (err) {
@@ -253,7 +265,16 @@ function publishCommand(kioskId, action, payload) {
     }
     
     const topic = mqttConfig.topics.command(kioskId);
+    // Flatten payload into root level, keeping consistent with the recent fix
     const message = JSON.stringify({ action, ...(payload || {}), timestamp: new Date().toISOString() });
+    
+    if (action === 'start_charging') {
+        if (!module.exports.lastStartCommandTime) module.exports.lastStartCommandTime = new Map();
+        module.exports.lastStartCommandTime.set(kioskId, new Date());
+        logger.mqtt(`[DEBUG-PUBLISH] EXACT RAW PUBLISHED start_charging PAYLOAD for ${kioskId}: ${message}`);
+    } else if (action === 'update_screen') {
+        logger.mqtt(`[DEBUG-PUBLISH] EXACT RAW PUBLISHED update_screen PAYLOAD for ${kioskId}: ${message}`);
+    }
     
     client.publish(topic, message, { qos: mqttConfig.QOS.COMMAND }, (err) => {
         if (err) {
@@ -266,5 +287,6 @@ function publishCommand(kioskId, action, payload) {
 
 module.exports = {
     init,
-    publishCommand
+    publishCommand,
+    lastStartCommandTime: new Map()
 };
