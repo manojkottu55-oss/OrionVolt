@@ -28,6 +28,8 @@ const calculateEstimate = async (req, res) => {
         let targetEnergyKwh = 0;
         let estimatedAmount = 0;
         let breakdown = '';
+        let percentGainedRes = null;
+        let resultingBatteryPctRes = null;
 
         if (chargingMode === 'amount') {
             const reqAmount = parseFloat(amount);
@@ -38,6 +40,23 @@ const calculateEstimate = async (req, res) => {
             targetEnergyKwh = reqAmount / energyRate;
             estimatedAmount = reqAmount;
             breakdown = `Amount (₹${reqAmount}) / Rate (₹${energyRate}/kWh) = ${targetEnergyKwh.toFixed(3)} kWh`;
+
+            const batteryCapacity = vehicle.battery_capacity_kwh;
+            const percentGained = (targetEnergyKwh / batteryCapacity) * 100;
+            percentGainedRes = parseFloat(percentGained.toFixed(1));
+
+            if (currentBatteryPct) {
+                const currentPct = parseFloat(currentBatteryPct);
+                if (!isNaN(currentPct) && currentPct >= 0 && currentPct <= 100) {
+                    const resultingBatteryPct = Math.min(100, currentPct + percentGained);
+                    resultingBatteryPctRes = parseFloat(resultingBatteryPct.toFixed(1));
+                    breakdown += `\nThis adds ~${percentGained.toFixed(1)}% to your battery (from ${currentPct}% → ${resultingBatteryPct.toFixed(1)}%)`;
+                } else {
+                    breakdown += `\nThis adds ~${percentGained.toFixed(1)}% battery charge`;
+                }
+            } else {
+                breakdown += `\nThis adds ~${percentGained.toFixed(1)}% battery charge`;
+            }
 
         } else if (chargingMode === 'percentage' || chargingMode === 'full_charge') {
             const currentPct = parseFloat(currentBatteryPct);
@@ -77,6 +96,8 @@ Cost: ${targetEnergyKwh.toFixed(3)} kWh × ₹${energyRate}/kWh = ₹${estimated
             estimatedAmount: parseFloat(estimatedAmount.toFixed(2)),
             estimatedTimeMinutes: estimatedTimeMinutes,
             energyRateUsed: energyRate,
+            percentGained: percentGainedRes,
+            resultingBatteryPct: resultingBatteryPctRes,
             breakdown,
             vehicle: {
                 make: vehicle.make,

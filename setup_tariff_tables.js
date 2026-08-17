@@ -22,7 +22,7 @@ async function run() {
       id INTEGER PRIMARY KEY CHECK (id = 1), -- Single row config
       buying_price_per_kwh NUMERIC NOT NULL DEFAULT 5.0,
       system_loss_percentage NUMERIC NOT NULL DEFAULT 4.2,
-      updated_at TIMESTAMPTZ DEFAULT now()
+      updated_at TIMESTAMPTZ DEFAULT now()I wnat all prvious 
     );
 
     -- RLS for config tables

@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS user_vehicles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_vehicles_user_id ON user_vehicles(user_id);
-
+ 
 -- 3. RLS for user_vehicles
 ALTER TABLE user_vehicles ENABLE ROW LEVEL SECURITY;
 
