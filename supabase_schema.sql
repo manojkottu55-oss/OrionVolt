@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS guest_sessions (
   estimated_time_minutes NUMERIC,
   estimated_amount   NUMERIC NOT NULL,
   status             TEXT DEFAULT 'pending'
-                       CHECK (status IN ('pending', 'paid', 'charging', 'completed', 'refunded', 'failed')),
+                       CHECK (status IN ('pending', 'calculated', 'paid', 'charging', 'completed', 'refunded', 'failed')),
   created_at         TIMESTAMPTZ DEFAULT now()
 );
 

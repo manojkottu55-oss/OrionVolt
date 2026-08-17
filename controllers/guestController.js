@@ -154,7 +154,7 @@ exports.updateSession = async (req, res) => {
       ? Math.round((estimatedEnergyKwh / avgChargingPowerKw) * 60)
       : 0;
 
-    // Persist updates to guest_sessions row
+    // Persist updates to guest_sessions row and advance status to 'calculated'
     const updated = await db.guestSessions.update(sessionId, {
       vehicleType:  resolvedVehicleType,
       vehicleMake:  vehicleMake  || null,
@@ -164,6 +164,7 @@ exports.updateSession = async (req, res) => {
       targetValue,
       requestedEnergy: targetType === 'energy' ? targetValue : estimatedEnergyKwh,
       estimatedAmount,
+      status: 'calculated',
     });
 
     return res.status(200).json({
@@ -194,8 +195,8 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    if (session.status !== 'pending') {
-      return res.status(400).json({ error: `Session is not in pending state (current: '${session.status}')` });
+    if (!['pending', 'calculated'].includes(session.status)) {
+      return res.status(400).json({ error: `Session is not ready for payment (current: '${session.status}')` });
     }
 
     if (!session.estimated_amount || session.estimated_amount <= 0) {

@@ -98,14 +98,21 @@ async function handleTelemetry(kioskId, data) {
                 }
             }
 
+            // Add a grace period for early "stopped" telemetry (e.g. from relay startup delay)
+            let isGenuineStop = data.chargerStatus === 'stopped';
+            if (isGenuineStop && sessionDurationMs < 5000 && energyDeliveredKwh < 0.01) {
+                logger.mqtt(`Ignoring 'stopped' status from ${kioskId} as session just started (${Math.round(sessionDurationMs)}ms ago).`);
+                isGenuineStop = false; // Treat as normal telemetry until genuine stop
+            }
+
             // Check for fault/interruption
-            if (data.chargerStatus === 'fault' || data.chargerStatus === 'stopped' || shouldAutoStop) {
+            if (data.chargerStatus === 'fault' || isGenuineStop || shouldAutoStop) {
                 updateFields.status = shouldAutoStop ? 'completed' : 'interrupted';
                 updateFields.endTime = new Date().toISOString();
                 
                 if (data.chargerStatus === 'fault') {
                     updateFields.interruptedReason = 'power_cut';
-                } else if (data.chargerStatus === 'stopped') {
+                } else if (isGenuineStop) {
                     updateFields.interruptedReason = 'manual_stop';
                 } else if (shouldAutoStop) {
                     updateFields.status = 'completed'; // auto-stop is normal completion
@@ -246,7 +253,7 @@ function publishCommand(kioskId, action, payload) {
     }
     
     const topic = mqttConfig.topics.command(kioskId);
-    const message = JSON.stringify({ action, payload, timestamp: new Date().toISOString() });
+    const message = JSON.stringify({ action, ...(payload || {}), timestamp: new Date().toISOString() });
     
     client.publish(topic, message, { qos: mqttConfig.QOS.COMMAND }, (err) => {
         if (err) {

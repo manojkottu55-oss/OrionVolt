@@ -193,7 +193,7 @@ exports.handleWebhook = async (req, res) => {
     }
 
     // Only start charging if not already started
-    if (session.status === 'pending' || session.status === 'created') {
+    if (['pending', 'created', 'calculated'].includes(session.status)) {
       // Update session to paid
       if (sessionType === 'guest') {
         await db.guestSessions.updateStatus(sessionId, 'paid');
@@ -210,11 +210,21 @@ exports.handleWebhook = async (req, res) => {
         status: 'active'
       });
 
+      // Fetch the tariff rate so the kiosk knows the cost basis
+      const { getTariffConfig } = require('../db/tariffConfig');
+      const tariff = await getTariffConfig();
+      const energyRate = parseFloat(tariff.energy_rate_per_kwh || 12);
+
+      // Pull the pre-calculated values from the session record
+      const targetEnergyKwh = parseFloat(session.requested_energy || 0);
+      const estimatedCost   = parseFloat(session.estimated_amount || 0);
+
       // Send MQTT command to kiosk
       await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        duration: session.requested_duration,
-        energy: session.requested_energy,
+        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
+        energyRate,            // ₹ per kWh (e.g. 12)
+        estimatedCost,         // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
 
@@ -298,10 +308,20 @@ exports.demoVerifyPayment = async (req, res) => {
 
     // 4. Send MQTT command to start charging
     try {
+      // Fetch the tariff rate so the kiosk knows the cost basis
+      const { getTariffConfig } = require('../db/tariffConfig');
+      const tariff = await getTariffConfig();
+      const energyRate = parseFloat(tariff.energy_rate_per_kwh || 12);
+
+      // Pull the pre-calculated values from the session record
+      const targetEnergyKwh = parseFloat(session.requested_energy || 0);
+      const estimatedCost   = parseFloat(session.estimated_amount || 0);
+
       await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        energy: session.requested_energy,
-        duration: session.requested_duration,
+        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
+        energyRate,            // ₹ per kWh (e.g. 12)
+        estimatedCost,         // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
       logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id}`);
