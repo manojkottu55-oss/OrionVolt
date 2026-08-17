@@ -93,9 +93,9 @@ exports.verifyPayment = async (req, res) => {
 
       mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
-        energyRate,            // ₹ per kWh (e.g. 12)
-        estimatedCost,         // ₹ total (e.g. 30.00)
+        energy: targetEnergyKwh,   // kWh to deliver — ESP32 reads payload.energy
+        energyRate,                // ₹ per kWh (e.g. 12)
+        estimatedCost,             // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
       logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id} — target: ${targetEnergyKwh} kWh @ ₹${energyRate}/kWh = ₹${estimatedCost}`);
@@ -222,9 +222,9 @@ exports.handleWebhook = async (req, res) => {
       // Send MQTT command to kiosk
       await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
-        energyRate,            // ₹ per kWh (e.g. 12)
-        estimatedCost,         // ₹ total (e.g. 30.00)
+        energy: targetEnergyKwh,   // kWh to deliver — ESP32 reads payload.energy
+        energyRate,                // ₹ per kWh (e.g. 12)
+        estimatedCost,             // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
 
@@ -319,9 +319,9 @@ exports.demoVerifyPayment = async (req, res) => {
 
       await mqttService.publishCommand(session.kiosk_id, 'start_charging', {
         sessionId,
-        targetEnergyKwh,       // kWh to deliver (e.g. 2.5)
-        energyRate,            // ₹ per kWh (e.g. 12)
-        estimatedCost,         // ₹ total (e.g. 30.00)
+        energy: targetEnergyKwh,   // kWh to deliver — ESP32 reads payload.energy
+        energyRate,                // ₹ per kWh (e.g. 12)
+        estimatedCost,             // ₹ total (e.g. 30.00)
         vehicleType: session.vehicle_type
       });
       logger.payment(`MQTT start_charging sent to kiosk ${session.kiosk_id}`);

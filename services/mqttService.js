@@ -265,8 +265,12 @@ function publishCommand(kioskId, action, payload) {
     }
     
     const topic = mqttConfig.topics.command(kioskId);
-    // Flatten payload into root level, keeping consistent with the recent fix
-    const message = JSON.stringify({ action, ...(payload || {}), timestamp: new Date().toISOString() });
+    // ESP32 firmware expects nested structure: { action, payload: {...}, timestamp }
+    const message = JSON.stringify({
+        action,
+        payload: payload || {},
+        timestamp: new Date().toISOString()
+    });
     
     if (action === 'start_charging') {
         if (!module.exports.lastStartCommandTime) module.exports.lastStartCommandTime = new Map();
