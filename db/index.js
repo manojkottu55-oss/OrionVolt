@@ -17,6 +17,7 @@ const alerts = require('./alerts');
 const bookings = require('./bookings');
 const userVehicles = require('./userVehicles');
 const supportTickets = require('./supportTickets');
+const slotAccessCodes = require('./slotAccessCodes');
 
 module.exports = {
   kiosks,
@@ -33,5 +34,6 @@ module.exports = {
   alerts,
   bookings,
   userVehicles,
-  supportTickets
+  supportTickets,
+  slotAccessCodes
 };

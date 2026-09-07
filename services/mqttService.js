@@ -200,6 +200,73 @@ async function handleStatus(kioskId, data) {
 }
 
 /**
+ * Handle access code verification from kiosk keypad
+ * ESP32 publishes: { accessCode: "1234" } to orionvolt/{kioskId}/access-verify
+ * Backend responds on orionvolt/{kioskId}/access-result with { valid: true/false, ... }
+ * @param {string} kioskId
+ * @param {object} data
+ */
+async function handleAccessVerify(kioskId, data) {
+    const { accessCode } = data;
+    const resultTopic = mqttConfig.topics.accessResult(kioskId);
+
+    if (!accessCode) {
+        client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'No access code provided' }));
+        return;
+    }
+
+    try {
+        const codeRecord = await db.slotAccessCodes.findByKioskAndCode(kioskId, accessCode);
+
+        if (!codeRecord) {
+            logger.mqtt(`Access verify FAILED for ${kioskId}: code ${accessCode} not found`);
+            client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'Invalid access code' }), { qos: 1 });
+            return;
+        }
+
+        const now = new Date();
+        const validFrom  = new Date(codeRecord.valid_from);
+        const validUntil = new Date(codeRecord.valid_until);
+
+        if (now < validFrom) {
+            logger.mqtt(`Access verify FAILED for ${kioskId}: too early (slot starts at ${validFrom.toISOString()})`);
+            client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'Slot not started yet' }), { qos: 1 });
+            return;
+        }
+
+        if (now > validUntil) {
+            logger.mqtt(`Access verify FAILED for ${kioskId}: slot expired at ${validUntil.toISOString()}`);
+            await db.slotAccessCodes.updateStatus(codeRecord.id, 'expired');
+            client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'Slot time has expired' }), { qos: 1 });
+            return;
+        }
+
+        // Validate the linked booking
+        const booking = codeRecord.slot_bookings;
+        if (!booking || booking.status !== 'confirmed') {
+            logger.mqtt(`Access verify FAILED for ${kioskId}: booking status is ${booking?.status}`);
+            client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'Booking is not in confirmed state' }), { qos: 1 });
+            return;
+        }
+
+        // ✅ Code is valid — mark used, unlock booking
+        await db.slotAccessCodes.updateStatus(codeRecord.id, 'used');
+        await db.bookings.updateStatus(booking.id, 'active_unlocked');
+
+        logger.mqtt(`Access verify SUCCESS for ${kioskId}: code ${accessCode}, booking ${booking.id} → active_unlocked`);
+        client.publish(resultTopic, JSON.stringify({
+            valid:       true,
+            bookingId:   booking.id,
+            sessionInfo: `Booked for ${Math.round((validUntil - now) / 60000)} min remaining`
+        }), { qos: 1 });
+
+    } catch (err) {
+        logger.error(`handleAccessVerify error for ${kioskId}: ${err.message}`);
+        client.publish(resultTopic, JSON.stringify({ valid: false, reason: 'Internal error' }), { qos: 1 });
+    }
+}
+
+/**
  * Initialize the MQTT client and subscriptions
  */
 function init() {
@@ -237,6 +304,9 @@ function init() {
             } else if (messageType === 'status') {
                 logger.mqtt(`Received status from ${kioskId}: ${rawString}`);
                 await handleStatus(kioskId, data);
+            } else if (messageType === 'access-verify') {
+                logger.mqtt(`Received access-verify from ${kioskId}: ${rawString}`);
+                await handleAccessVerify(kioskId, data);
             }
         } catch (err) {
             logger.error(`Failed to parse MQTT message on topic ${topic}: ${err.message}`);

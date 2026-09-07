@@ -51,6 +51,14 @@ const server = app.listen(config.PORT, async () => {
     } catch (err) {
         logger.error('Failed to initialize MQTT: ' + err.message);
     }
+
+    // Start booking expiry background service
+    try {
+        const bookingExpiryService = require('./services/bookingExpiryService');
+        bookingExpiryService.start();
+    } catch (err) {
+        logger.error('Failed to start booking expiry service: ' + err.message);
+    }
 });
 
 // Graceful shutdown
@@ -107,6 +115,17 @@ app.get('/api/kiosks/list-all', async (req, res) => {
         const db = require('./db');
         const kiosks = await db.kiosks.findAll();
         res.json({ kiosks: kiosks.map(k => k.kiosk_id) });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Endpoint to fetch all kiosks with their details (used by User App map)
+app.get('/api/kiosks', async (req, res) => {
+    try {
+        const db = require('./db');
+        const kiosks = await db.kiosks.findAll();
+        res.json({ success: true, kiosks });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

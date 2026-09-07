@@ -16,7 +16,8 @@ const getTariffConfig = async () => {
     return {
       energy_rate_per_kwh: 12,
       time_rate_per_minute: 2,
-      time_billing_enabled: true
+      time_billing_enabled: true,
+      slot_booking_rate_per_hour: 20
     };
   }
 

@@ -3,24 +3,28 @@ const router = express.Router();
 const bookingsController = require('../controllers/bookingsController');
 const authMiddleware = require('../middleware/auth');
 
-// Since we don't have a strict admin middleware yet (assumed from server.js routes), 
-// we'll just use authMiddleware and the controller handles basic ownership checks.
-// If an admin middleware exists, it should be applied to admin routes.
-// For now, these are mixed user/admin routes.
+// ── User routes (auth required) ───────────────────────────────────────────────
 
-// User & Admin: Get all bookings (admin sees all, user sees own)
-router.get('/', authMiddleware, bookingsController.getAllBookings);
-
-// User: Create a new booking
+// Create a new booking (with server-side overlap check)
 router.post('/', authMiddleware, bookingsController.createBooking);
 
-// User/Admin: Cancel a booking
+// Confirm payment for a booking → generates + returns access code
+router.post('/:id/confirm-payment', authMiddleware, bookingsController.confirmSlotPayment);
+
+// Retrieve access code for a booking
+router.get('/:id/access-code', authMiddleware, bookingsController.getAccessCode);
+
+// Start charging from an unlocked booking
+router.post('/:id/start-charging', authMiddleware, bookingsController.startChargingFromBooking);
+
+// List bookings (filtered to own bookings for authenticated users)
+router.get('/', authMiddleware, bookingsController.getAllBookings);
+
+// Cancel a booking
 router.delete('/:id', authMiddleware, bookingsController.deleteBooking);
+router.post('/:id/cancel', authMiddleware, bookingsController.cancelBooking);
 
-// Admin: Update booking status
-router.patch('/:id/status', authMiddleware, bookingsController.updateStatus);
-
-// Public/User: Check availability for a kiosk
+// Check kiosk availability on a date
 router.get('/kiosk/:kioskId', bookingsController.getKioskAvailability);
 
 module.exports = router;

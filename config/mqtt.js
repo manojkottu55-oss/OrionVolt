@@ -1,10 +1,16 @@
 const topics = {
-  telemetry: (kioskId) => `orionvolt/${kioskId}/telemetry`,
-  status: (kioskId) => `orionvolt/${kioskId}/status`,
-  command: (kioskId) => `orionvolt/${kioskId}/command`
+  telemetry:     (kioskId) => `orionvolt/${kioskId}/telemetry`,
+  status:        (kioskId) => `orionvolt/${kioskId}/status`,
+  command:       (kioskId) => `orionvolt/${kioskId}/command`,
+  accessVerify:  (kioskId) => `orionvolt/${kioskId}/access-verify`,
+  accessResult:  (kioskId) => `orionvolt/${kioskId}/access-result`
 };
 
-const SUBSCRIBE_TOPICS = ['orionvolt/+/telemetry', 'orionvolt/+/status'];
+const SUBSCRIBE_TOPICS = [
+  'orionvolt/+/telemetry',
+  'orionvolt/+/status',
+  'orionvolt/+/access-verify'
+];
 
 const QOS = {
   TELEMETRY: 0,

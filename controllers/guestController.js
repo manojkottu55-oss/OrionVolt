@@ -40,7 +40,17 @@ exports.createSession = async (req, res) => {
       return res.status(404).json({ error: `Kiosk '${kioskId}' not found` });
     }
 
-    // Map Supabase snake_case vehicle to the format tariff expects
+    // Task 10: Kiosk lock check — reject if an active slot booking covers this moment
+    const now = new Date().toISOString();
+    const activeBooking = await db.bookings.findActiveBookingForKiosk(kioskId, now);
+    if (activeBooking) {
+      const until = new Date(activeBooking.slot_end_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      logger.info(`[KioskLock] Guest session blocked for ${kioskId} — booking ${activeBooking.id} active until ${until}`);
+      return res.status(423).json({
+        error: `This kiosk is reserved for a booked session until ${until}. Please use another kiosk or wait until it becomes available.`
+      });
+    }
+
     const vehicleForTariff = vehicleObj ? {
       type: vehicleObj.type,
       batteryCapacityKwh: vehicleObj.battery_capacity_kwh
