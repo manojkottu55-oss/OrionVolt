@@ -26,6 +26,7 @@ const calculateEstimate = async (req, res) => {
         }
 
         let targetEnergyKwh = 0;
+
         let estimatedAmount = 0;
         let breakdown = '';
         let percentGainedRes = null;
@@ -112,6 +113,8 @@ Cost: ${targetEnergyKwh.toFixed(3)} kWh × ₹${energyRate}/kWh = ₹${estimated
     }
 };
 
+
+
 /**
  * POST /api/charge/booking-calculate
  * Booking-specific calculation. Key differences from calculateEstimate:
@@ -191,18 +194,18 @@ const calculateBookingEstimate = async (req, res) => {
         breakdown += `\nTotal payable: ₹${estimatedAmount} + ₹${bookingFee} = ₹${totalPayable}`;
 
         return res.json({
-            targetEnergyKwh:        parseFloat(targetEnergyKwh.toFixed(3)),
-            estimatedAmount:        parseFloat(estimatedAmount.toFixed(2)),
+            targetEnergyKwh: parseFloat(targetEnergyKwh.toFixed(3)),
+            estimatedAmount: parseFloat(estimatedAmount.toFixed(2)),
             estimatedSocGainPercent,
             estimatedTimeMinutes,
             slotDurationMinutes,
             bookingFee,
             totalPayable,
-            energyRateUsed:         energyRate,
+            energyRateUsed: energyRate,
             bookingRatePerHour,
             vehicle: {
-                make:     vehicle.make,
-                model:    vehicle.model,
+                make: vehicle.make,
+                model: vehicle.model,
                 capacity: batteryCapacity
             },
             breakdown

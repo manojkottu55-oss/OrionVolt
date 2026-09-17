@@ -118,22 +118,49 @@ async function createSlotBooking(booking) {
 }
 
 /**
- * Check for overlapping confirmed/pending bookings on a kiosk
- * Returns any conflicting booking or null
+ * Check for overlapping bookings on a kiosk at booking-creation time.
+ * Only blocks on hard-confirmed or in-progress statuses — NOT pending_payment.
+ * This allows two users to enter the wizard simultaneously; only the first
+ * to confirm payment wins (see checkOverlapForConfirm).
+ *
+ * Overlap condition: existingStart < newEnd AND existingEnd > newStart
+ * Returns conflicting booking row or null.
  */
 async function checkOverlap(kioskId, startTs, endTs) {
-  // A booking overlaps if: existing.arrival_time < newEnd AND existing.slot_end_time > newStart
   const { data, error } = await supabase
     .from('slot_bookings')
     .select('id, arrival_time, slot_end_time, status')
     .eq('kiosk_id', kioskId)
-    .in('status', ['pending_payment', 'confirmed', 'active_unlocked', 'charging'])
-    .lt('arrival_time', endTs)
-    .gt('slot_end_time', startTs)
+    .in('status', ['confirmed', 'active_unlocked', 'charging'])
+    .lt('arrival_time', endTs)   // existing.start < new.end
+    .gt('slot_end_time', startTs) // existing.end   > new.start
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data; // null if no conflict
+  return data; // null = no hard conflict at creation time
+}
+
+/**
+ * Stricter overlap check run immediately before issuing an access code
+ * (inside confirmSlotPayment). Closes the race window where two users
+ * both enter pending_payment for the same slot and both try to pay.
+ *
+ * Excludes the booking being confirmed so it does not conflict with itself.
+ * Returns conflicting booking row or null.
+ */
+async function checkOverlapForConfirm(kioskId, startTs, endTs, excludeBookingId) {
+  const { data, error } = await supabase
+    .from('slot_bookings')
+    .select('id, arrival_time, slot_end_time, status')
+    .eq('kiosk_id', kioskId)
+    .in('status', ['confirmed', 'active_unlocked', 'charging'])
+    .lt('arrival_time', endTs)
+    .gt('slot_end_time', startTs)
+    .neq('id', excludeBookingId)  // don't conflict with self
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 /**
@@ -205,6 +232,7 @@ module.exports = {
   // New
   createSlotBooking,
   checkOverlap,
+  checkOverlapForConfirm,
   findActiveBookingForKiosk,
   confirmWithCode,
   findExpiredConfirmed,

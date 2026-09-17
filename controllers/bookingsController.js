@@ -48,10 +48,13 @@ exports.createBooking = async (req, res) => {
     // ── Task 4: Hard server-side overlap check ──
     const conflict = await db.bookings.checkOverlap(kioskId, arrival.toISOString(), slotEnd.toISOString());
     if (conflict) {
-      const from = new Date(conflict.arrival_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-      const to   = new Date(conflict.slot_end_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      // Return raw ISO timestamps — the frontend formats them in IST (browser locale).
+      // NEVER format on the server: Node runs in UTC and would show the wrong local time.
       return res.status(409).json({
-        error: `This kiosk is already booked from ${from} to ${to}. Please choose a different time or kiosk.`
+        error: 'SLOT_CONFLICT',
+        conflictStart: conflict.arrival_time,
+        conflictEnd:   conflict.slot_end_time,
+        message: 'This kiosk is already booked for the selected time window. Please choose a different time or kiosk.'
       });
     }
 
@@ -118,6 +121,30 @@ exports.confirmSlotPayment = async (req, res) => {
     }
     if (booking.status !== 'pending_payment') {
       return res.status(400).json({ error: `Booking is already in status: ${booking.status}` });
+    }
+
+    // ── RACE-WINDOW GUARD: Re-check overlap right before issuing the code. ──
+    // This catches the scenario where two users both paid for the same slot
+    // simultaneously. The first to reach this point wins; the second is
+    // auto-cancelled and told clearly what happened.
+    const raceConflict = await db.bookings.checkOverlapForConfirm(
+      booking.kiosk_id,
+      booking.arrival_time,
+      booking.slot_end_time,
+      booking.id  // exclude self
+    );
+    if (raceConflict) {
+      // Auto-cancel the losing booking so the slot is fully freed
+      await db.bookings.updateStatus(id, 'cancelled');
+      logger.warn(`Booking ${id} cancelled — race condition: lost to booking ${raceConflict.id}`);
+      return res.status(409).json({
+        error: 'RACE_CONFLICT',
+        conflictStart: raceConflict.arrival_time,
+        conflictEnd:   raceConflict.slot_end_time,
+        message:
+          'This slot was just confirmed by another user while your payment was processing. ' +
+          'Your booking has been cancelled. Please go back and choose a different time or kiosk.',
+      });
     }
 
     // Generate unique 4-digit access code
